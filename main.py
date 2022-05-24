@@ -24,4 +24,3 @@ def proc(cnf):
         print(CNFDebugger.get_solver_model(s, cnf))
     else:
         print(f"No Solution Found")
-

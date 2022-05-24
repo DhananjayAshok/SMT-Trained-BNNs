@@ -4,6 +4,10 @@ from pysat.solvers import Solver
 
 class CNFBuilder:
     @staticmethod
+    def get_IDPool():
+        return IDPool()
+
+    @staticmethod
     def implies(x, y):
         return [-x, y]
 
@@ -61,6 +65,91 @@ class CNFBuilder:
             for j in range(2, C + 1):
                 clauses.extend(CNFBuilder.aiffbacod(r[i, j], var_list[i - 1], r[i - 1, j - 1], r[i - 1, j]))
         return clauses, vpool, r[m, C]
+
+    @staticmethod
+    def xnor_link(a, b, c):
+        """
+        Returns clauses to force (a XNOR b) <=> c
+        """
+        return [a, -b, -c], [-a, b, -c], [a, b, c], [-a, -b, c]
+
+    @staticmethod
+    def product_link(xs, ws, xws):
+        """
+        n input dimensionality, m output dimensionality
+        xs: list of n input integers
+        ws: list of m lists of n integers ws[m-1][n-1] is last element
+        xws: same shape as ws except xws[i][j] = ws[i][j]xs[j]
+        the activation of h[i] will be 1 iff sum of all xws[i] > constant cutoff
+        """
+        clauses = []
+        for j in range(len(xws)):
+            ws_j = ws[j]
+            xws_j = xws[j]
+            for i in range(len(xs)):
+                clauses.extend(CNFBuilder.xnor_link(xs[i], ws_j[i], xws_j[i]))
+        return clauses
+
+    @staticmethod
+    def create_layer(in_features, out_features, id_pool=None, layer_id="0", datapoint_id="0",
+                     create_input=False, xs=[], do_linking=False):
+        """
+        Returns lists xs, ws, xws which contain the integer IDs of the respective variables in the SAT problem.
+        ws is a nested list len(ws) = out_features, len(ws[j]) = in_features for all j
+        xws is same shape where xws[i][j] = ws[i][j] XNOR xs[j]
+
+        returns a list of clauses which encodes xws = Wx if do_linking is True.
+
+        Typically the next layer h is such that h[j] = 1 <=> sum of all xws[j] > constant
+
+        """
+        ws = []
+        xws = []
+        clauses = []
+        if id_pool is None:
+            id_pool = CNFBuilder.get_IDPool()
+        if create_input and len(xs) == 0:
+            for i in range(in_features):
+                x = id_pool.id(f"l{layer_id},d{datapoint_id},x{i}")
+                xs.append(x)
+        for j in range(out_features):
+            w_j = []
+            xw_j=[]
+            for i in range(in_features):
+                w = id_pool.id(f"l{layer_id},d{datapoint_id},w{i, j}")
+                xw = id_pool.id(f"l{layer_id},d{datapoint_id},xw{i, j}")
+                w_j.append(w)
+                xw_j.append(xw)
+            ws.append(w_j)
+            xws.append(xw_j)
+
+        if do_linking:
+            clauses = CNFBuilder.product_link(xs, ws, xws)
+
+        return xs, ws, xws, clauses
+
+    @staticmethod
+    def assign_values(inp_array, inp_list, val_type=""):
+        """
+        Returns the constraints for assigning every element of inp_array to the corresponding inp_list values.
+        """
+        clauses = []
+        if val_type == "x":
+            for i in range(len(inp_array)):
+                if inp_array[i] == 0:
+                    clauses.append(-inp_list[i])
+                else:
+                    clauses.append([inp_list[i]])
+
+        if val_type == "w":
+            pass
+        if val_type == "o":
+            for i in range(len(inp_array)):
+                if inp_array[i] == 0:
+                    clauses.append(-inp_list[i])
+                else:
+                    clauses.append([inp_list[i]])
+        return
 
 
 class CNFDebugger:
