@@ -2,6 +2,7 @@ import pytest
 from utils import CNFBuilder, IDPool, CNFDebugger
 from pysat.solvers import Solver
 from pysat.formula import CNF
+import numpy as np
 
 
 def basic_setup():
@@ -27,6 +28,14 @@ def basic_solver(cnf):
     if status:
         return CNFDebugger.get_solver_model(s, cnf)
     return status
+
+
+def basic_dataset():
+    n_datapoints = 10
+    in_dim=3
+    X = np.random.rand(n_datapoints, in_dim) > 0.5
+    y = X.sum(axis=1) > in_dim//2
+    return X, y
 
 
 def test_get_IDPool():
@@ -220,7 +229,7 @@ def test_xnor_link():
     assert status["h"]
 
 
-def test_product_link():
+def test_linear_product_link():
     basic_cnf, a, b, c, d = basic_setup()
     e = basic_cnf.vpool.id("e")
     f = basic_cnf.vpool.id("f")
@@ -228,13 +237,13 @@ def test_product_link():
     h = basic_cnf.vpool.id("h")
     i = basic_cnf.vpool.id("i")
     j = basic_cnf.vpool.id("j")
-    xs = [a, b]
+    xs = [[a, b]]
     ws = [[c, d], [e, f]]
-    xws = [[g, h], [i, j]]
+    xws = [[[g, h], [i, j]]]
     clauses = [[c], [d], [-e], [-f]]
     # We should have g = ac, h = bd, i = ae, j = bf where multiplication is XNOR
     basic_cnf.extend(clauses)
-    clauses = CNFBuilder.product_link(xs, ws, xws)
+    clauses = CNFBuilder.linear_product_link(xs, ws, xws)
     basic_cnf.extend(clauses)
     status = basic_solver(basic_cnf)
     print(status)
@@ -247,26 +256,82 @@ def test_product_link():
 
 def test_create_layer():
     basic_cnf, a, b, c, d = basic_setup()
+    a1 = basic_cnf.vpool.id("a1")
+    b1 = basic_cnf.vpool.id("b1")
+    e = basic_cnf.vpool.id("e")
+    f = basic_cnf.vpool.id("f")
     in_features = 3
     out_features = 2
     id_pool = basic_cnf.vpool
-    do_linking = True
-    xs, ws, xws, clauses = CNFBuilder.create_layer(in_features, out_features, id_pool=id_pool, layer_id="0", datapoint_id="0",
-                 create_input=True, xs=[], do_linking=do_linking)
-    clauses.extend([[xs[0]], [-xs[1]]])
+    do_linking = False
+    ws = [[a1, b1, c], [d, e, f]]
+    xs, ws, xws, hs, clauses = CNFBuilder.create_linear_layer(in_features, out_features, n_datapoints=1, ws=ws,
+                                                              id_pool=id_pool, layer_id="0", xs=[],
+                                                              do_linking=do_linking)
+    clauses.extend([[xs[0][0]], [-xs[0][1]]])
     for i in range(2):
         clauses.append([ws[0][i]])
-
-    for i in range(2):
         clauses.append([-ws[1][i]])
+
     basic_cnf.extend(clauses)
     status = basic_solver(basic_cnf)
+    assert len(xs) == 1
+    assert len(xs[0]) == in_features
+    assert len(xws) == 1
+    assert len(xws) == 1
+    assert len(xws[0]) == out_features
+    assert len(xws[0][0]) == in_features
+    assert len(hs) == 1
+    assert len(hs[0]) == out_features
     print(status)
     assert status is not False
     assert status[f"l{0},d{0},xw{0, 0}"]
     assert not status[f"l{0},d{0},xw{0, 1}"]
     assert not status[f"l{0},d{0},xw{1, 0}"]
     assert status[f"l{0},d{0},xw{1, 1}"]
+
+
+def test_nn():
+    return
+    X, Y = basic_dataset()
+    # nn architecture: 3 -> 2 -> 1
+    id_pool = CNFBuilder.get_IDPool()
+    all_ws = []
+    all_xs = []
+    os = []
+    clauses = []
+    for i in range(len(X)):
+        x = X[i]
+        y = Y[i]
+        xs, ws, xws, c = CNFBuilder.create_layer(3, 2, id_pool=id_pool, layer_id="0",
+                                                       datapoint_id=f"{i}",
+                                                       create_input=True, xs=[], do_linking=True)
+        all_ws.append(ws)
+        clauses.extend(c)
+        all_xs.append(xs)
+        hs = []
+        for j in range(2):
+            h_clauses, _, h = CNFBuilder.sequential_counter(xws[j], vpool=id_pool, prefix=f"h_{j}_d_{i}", C=2)
+            clauses.extend(h_clauses)
+            hs.append(h)
+        hs, h_ws, hws, o_clauses = CNFBuilder.create_layer(2, 1, id_pool=id_pool, layer_id="1",
+                                                       datapoint_id=f"{i}",
+                                                       create_input=False, xs=hs, do_linking=True)
+        all_ws.append(h_ws)
+        clauses.extend(o_clauses)
+        output_clauses, _, o = CNFBuilder.sequential_counter(hws[0], vpool=id_pool, prefix=f"o{i}", C=1)
+        os.append(o)
+        clauses.extend(output_clauses)
+    clauses.extend(CNFBuilder.assign_values(inp_array=X, inp_list=all_xs, val_type="x"))
+    clauses.extend(CNFBuilder.assign_values(inp_array=Y, inp_list=os, val_type="o"))
+    cnf = CNF()
+    cnf.vpool = id_pool
+    cnf.extend(clauses)
+    status = basic_solver(cnf)
+    print(status)
+    assert not status
+
+
 
 
 

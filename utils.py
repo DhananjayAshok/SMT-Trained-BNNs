@@ -1,5 +1,10 @@
 from pysat.formula import CNF, IDPool
 from pysat.solvers import Solver
+import numpy as np
+
+
+def int_array(x):
+    return x
 
 
 class CNFBuilder:
@@ -74,59 +79,89 @@ class CNFBuilder:
         return [a, -b, -c], [-a, b, -c], [a, b, c], [-a, -b, c]
 
     @staticmethod
-    def product_link(xs, ws, xws):
+    def linear_product_link(xs, ws, xws):
         """
         n input dimensionality, m output dimensionality
-        xs: list of n input integers
-        ws: list of m lists of n integers ws[m-1][n-1] is last element
-        xws: same shape as ws except xws[i][j] = ws[i][j]xs[j]
-        the activation of h[i] will be 1 iff sum of all xws[i] > constant cutoff
+        xs: nested list shape [n_datapoints, n]
+        ws: nested list shape [m, n]
+        xws: nested list shape [n_datapoints, m, n]
+        the activation of h[t, i] will be 1 iff sum of all (over i) xws[t, i] > constant cutoff
         """
         clauses = []
-        for j in range(len(xws)):
-            ws_j = ws[j]
-            xws_j = xws[j]
-            for i in range(len(xs)):
-                clauses.extend(CNFBuilder.xnor_link(xs[i], ws_j[i], xws_j[i]))
+        n_datapoints, m, n = len(xws), len(xws[0]), len(xws[0][0])
+        for t in range(n_datapoints):
+            for j in range(m):
+                ws_j = ws[j]
+                xws_j = xws[t][j]
+                for i in range(n):
+                    clauses.extend(CNFBuilder.xnor_link(xs[t][i], ws_j[i], xws_j[i]))
         return clauses
 
     @staticmethod
-    def create_layer(in_features, out_features, id_pool=None, layer_id="0", datapoint_id="0",
-                     create_input=False, xs=[], do_linking=False):
+    def create_linear_layer(in_features, out_features, n_datapoints=1, ws=[], xs=[], id_pool=None, layer_id="0",
+                            do_linking=True, do_activation=True):
         """
         Returns lists xs, ws, xws which contain the integer IDs of the respective variables in the SAT problem.
         ws is a nested list len(ws) = out_features, len(ws[j]) = in_features for all j
-        xws is same shape where xws[i][j] = ws[i][j] XNOR xs[j]
+        xws is shape where n_datapoints, out_features, in_features
 
         returns a list of clauses which encodes xws = Wx if do_linking is True.
 
         Typically the next layer h is such that h[j] = 1 <=> sum of all xws[j] > constant
 
         """
-        ws = []
         xws = []
         clauses = []
         if id_pool is None:
             id_pool = CNFBuilder.get_IDPool()
-        if create_input and len(xs) == 0:
-            for i in range(in_features):
-                x = id_pool.id(f"l{layer_id},d{datapoint_id},x{i}")
-                xs.append(x)
-        for j in range(out_features):
-            w_j = []
-            xw_j=[]
-            for i in range(in_features):
-                w = id_pool.id(f"l{layer_id},d{datapoint_id},w{i, j}")
-                xw = id_pool.id(f"l{layer_id},d{datapoint_id},xw{i, j}")
-                w_j.append(w)
-                xw_j.append(xw)
-            ws.append(w_j)
-            xws.append(xw_j)
+
+        if xs == []:
+            for d in range(n_datapoints):
+                x_list = []
+                for i in range(in_features):
+                    x = id_pool.id(f"X{d, i}")
+                    x_list.append(x)
+                xs.append(x_list)
+        xs = int_array(xs)
+
+        if ws == []:
+            for j in range(out_features):
+                w_list = []
+                for iii in range(in_features):
+                    w = id_pool.id(f"Layer[{layer_id}]|w{j, iii}")
+                    w_list.append(w)
+                ws.append(w_list)
+        ws = int_array(ws)
+
+        for d in range(n_datapoints):
+            xw_d = []
+            for j in range(out_features):
+                xw_j = []
+                for i in range(in_features):
+                    xw = id_pool.id(f"Layer[{layer_id}]|xw{j, i}")
+                    xw_j.append(xw)
+                xw_d.append(xw_j)
+            xws.append(xw_d)
+        xws = int_array(xws)
 
         if do_linking:
-            clauses = CNFBuilder.product_link(xs, ws, xws)
+            clauses.extend(CNFBuilder.linear_product_link(xs, ws, xws))
 
-        return xs, ws, xws, clauses
+        if do_activation:
+            hs = []
+            for d in range(n_datapoints):
+                h_list = []
+                for j in range(out_features):
+                    h_clauses, _, h = CNFBuilder.sequential_counter(xws[d][j], vpool=id_pool,
+                                                                    prefix=f"h[{layer_id}]{d, j}",
+                                                                    C=(out_features+1)//2)
+                    h_list.append(h)
+                    clauses.extend(h_clauses)
+                hs.append(h_list)
+            hs = int_array(hs)
+            return xs, ws, xws, hs, clauses
+        else:
+            return xs, ws, xws, clauses
 
     @staticmethod
     def assign_values(inp_array, inp_list, val_type=""):
@@ -136,20 +171,21 @@ class CNFBuilder:
         clauses = []
         if val_type == "x":
             for i in range(len(inp_array)):
-                if inp_array[i] == 0:
-                    clauses.append(-inp_list[i])
-                else:
-                    clauses.append([inp_list[i]])
+                for j in range(len(inp_array[0])):
+                    if inp_array[i, j] == 0 or not inp_array[i][j]:
+                        clauses.append([-inp_list[i][j]])
+                    else:
+                        clauses.append([inp_list[i][j]])
 
         if val_type == "w":
             pass
         if val_type == "o":
             for i in range(len(inp_array)):
-                if inp_array[i] == 0:
-                    clauses.append(-inp_list[i])
+                if inp_array[i] == 0 or not inp_array[i]:
+                    clauses.append([-inp_list[i]])
                 else:
                     clauses.append([inp_list[i]])
-        return
+        return clauses
 
 
 class CNFDebugger:
@@ -196,4 +232,5 @@ class CNFDebugger:
             if name is not None:
                 m[name] = var > 0
         return m
+
 

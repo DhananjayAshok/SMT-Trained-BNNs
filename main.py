@@ -1,4 +1,3 @@
-import aiger
 from pysat.formula import CNF, IDPool
 from pysat.solvers import Solver
 from utils import CNFBuilder, CNFDebugger
