@@ -2,6 +2,8 @@ import pytest
 from SATNet import SATNet
 import torch.nn as nn
 import torch
+from pysat.formula import CNF
+from utils import CNFDebugger
 
 
 def single_layer_network(in_dim, out_dim):
@@ -15,6 +17,11 @@ def double_layer_network(in_dim, mid_dim, out_dim):
     layer1 = nn.Linear(in_features=mid_dim, out_features=out_dim)
     model = nn.Sequential(layer, layer1)
     return SATNet(model)
+
+
+def rand_binary(*shape):
+    arr = torch.rand(shape)
+    return arr > 0
 
 
 def test_create_linear_params():
@@ -56,7 +63,7 @@ def test_create_datapoint_params():
     out_dim = 1
     satnet = double_layer_network(in_dim=in_dim, mid_dim=mid_dim, out_dim=out_dim)
     satnet.create_network_params()
-    X = torch.rand(32, in_dim)
+    X = rand_binary(32, in_dim)
     satnet.create_datapoint_params(X)
     assert True
 
@@ -68,9 +75,13 @@ def test_create_architecture():
     out_dim = 1
     satnet = double_layer_network(in_dim=in_dim, mid_dim=mid_dim, out_dim=out_dim)
     satnet.create_network_params()
-    X = torch.rand(32, in_dim)
+    X = rand_binary(32, in_dim)
     xs = satnet.create_datapoint_params(X)
     os = satnet.create_architecture(xs)
+    cnf = CNF()
+    cnf.extend(satnet.clauses)
+    solver = satnet.solver_class(bootstrap_with=cnf)
+    solution = CNFDebugger.get_solver_model(solver, cnf)
     assert True
 
 
@@ -81,8 +92,8 @@ def test_create_output_params():
     out_dim = 1
     satnet = double_layer_network(in_dim=in_dim, mid_dim=mid_dim, out_dim=out_dim)
     satnet.create_network_params()
-    X = torch.rand(32, in_dim)
-    y = torch.rand(32, out_dim)
+    X = rand_binary(32, in_dim)
+    y = rand_binary(32, out_dim)
     xs = satnet.create_datapoint_params(X)
     assert len(xs) == 32
     assert len(xs[0]) == in_dim
@@ -92,4 +103,16 @@ def test_create_output_params():
     print(len(os))
     print(len(os[0]))
     satnet.create_output_params(os, y)
+    assert True
+
+
+def test_sat_sweep():
+    in_dim = 3
+    mid_dim = 2
+    out_dim = 1
+    satnet = double_layer_network(in_dim=in_dim, mid_dim=mid_dim, out_dim=out_dim)
+    satnet.create_network_params()
+    X = rand_binary(32, in_dim)
+    y = rand_binary(32, out_dim)
+    satnet.sat_sweep(X, y)
     assert True
