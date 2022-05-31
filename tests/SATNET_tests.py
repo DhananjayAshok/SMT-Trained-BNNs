@@ -65,7 +65,16 @@ def test_create_datapoint_params():
     satnet.create_network_params()
     X = rand_binary(32, in_dim)
     satnet.create_datapoint_params(X)
-    assert True
+    print(satnet.clauses)
+    print(CNFDebugger.clause_translate(satnet.clauses, satnet.id_pool))
+    cnf = CNF()
+    cnf.extend(satnet.clauses)
+    cnf.vpool= satnet.id_pool
+    solver = satnet.solver_class(bootstrap_with=cnf)
+    solver.solve()
+    print("Core ", solver.get_core())
+    solution = CNFDebugger.get_solver_model(solver, cnf)
+    assert solution is not None
 
 
 def test_create_architecture():
@@ -78,11 +87,16 @@ def test_create_architecture():
     X = rand_binary(32, in_dim)
     xs = satnet.create_datapoint_params(X)
     os = satnet.create_architecture(xs)
+    print(CNFDebugger.clause_translate(satnet.clauses, satnet.id_pool))
     cnf = CNF()
     cnf.extend(satnet.clauses)
+    cnf.vpool= satnet.id_pool
     solver = satnet.solver_class(bootstrap_with=cnf)
+    solver.solve()
+    print("Core ", solver.get_core())
     solution = CNFDebugger.get_solver_model(solver, cnf)
-    assert True
+    assert solution is not None
+    assert False
 
 
 def test_create_output_params():
@@ -100,9 +114,15 @@ def test_create_output_params():
     os = satnet.create_architecture(xs)
     assert len(os) == 32
     assert len(os[0]) == out_dim
-    print(len(os))
-    print(len(os[0]))
     satnet.create_output_params(os, y)
+    cnf = CNF()
+    cnf.extend(satnet.clauses)
+    cnf.vpool= satnet.id_pool
+    solver = satnet.solver_class(bootstrap_with=cnf)
+    solver.solve()
+    print("Core ", solver.get_core())
+    solution = CNFDebugger.get_solver_model(solver, cnf)
+    assert solution is not None
     assert True
 
 

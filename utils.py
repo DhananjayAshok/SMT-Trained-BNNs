@@ -181,7 +181,7 @@ class CNFBuilder:
             pass
         if val_type == "o":
             for i in range(len(inp_array)):
-                if (hasattr(inp_array, 'shape') and len(inp_array.shape) == 1):
+                if (hasattr(inp_array, 'shape') and len(inp_array.shape) == 1) or not hasattr(inp_array, 'shape'):
                     if inp_array[i] == 0 or not inp_array[i]:
                         clauses.append([-inp_list[i]])
                     else:
@@ -192,7 +192,6 @@ class CNFBuilder:
                             clauses.append([-inp_list[i][j]])
                         else:
                             clauses.append([inp_list[i][j]])
-
         return clauses
 
 

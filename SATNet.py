@@ -34,7 +34,8 @@ class SATNet:
         for j in range(layer.out_features):
             for iii in range(layer.in_features):
                 w = self.solution.get(f"Layer[{i}]|w{j, iii}")
-                layer.weight[j, i] = 1 if w else -1
+                n_w = 1 if w else -1
+                layer.weight[j, i] = n_w
 
     def create_network_params(self):
         for i in range(len(self.model)):
@@ -80,6 +81,7 @@ class SATNet:
                                                                              out_features=layer.out_features, xs=hs,
                                                                              n_datapoints=n_datapoints,
                                                                              ws=layer.ids, layer_id=i)
+                print(CNFDebugger.clause_translate(clauses, self.id_pool))
                 self.clauses.extend(clauses)
         return hs
 
@@ -96,7 +98,11 @@ class SATNet:
         self.create_sat_model(X, y)
         cnf = CNF()
         cnf.extend(self.clauses)
+        cnf.vpool = self.id_pool
         solver = self.solver_class(bootstrap_with=cnf)
+        status = solver.solve()
         self.solution = CNFDebugger.get_solver_model(solver, cnf)
-        self.update_network_params()
+        print(self.solution)
+        if status:
+            self.update_network_params()
         return
