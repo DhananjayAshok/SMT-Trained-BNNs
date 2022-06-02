@@ -1,3 +1,4 @@
+import torch
 from torch.nn import Linear, Conv2d
 import numpy as np
 
@@ -35,7 +36,7 @@ class SATNet:
             for iii in range(layer.in_features):
                 w = self.solution.get(f"Layer[{i}]|w{j, iii}")
                 n_w = 1 if w else -1
-                layer.weight[j, i] = n_w
+                layer.weight[j, iii] = n_w
 
     def create_network_params(self):
         for i in range(len(self.model)):
@@ -75,13 +76,14 @@ class SATNet:
                     _, ws, xws, hs, clauses = CNFBuilder.create_linear_layer(in_features=layer.in_features,
                                                                              out_features=layer.out_features, xs=xs,
                                                                              n_datapoints=n_datapoints,
-                                                                             ws=layer.ids, layer_id=i)
+                                                                             ws=layer.ids, layer_id=i,
+                                                                             id_pool=self.id_pool)
                 else:
                     _, ws, xws, hs, clauses = CNFBuilder.create_linear_layer(in_features=layer.in_features,
                                                                              out_features=layer.out_features, xs=hs,
                                                                              n_datapoints=n_datapoints,
-                                                                             ws=layer.ids, layer_id=i)
-                print(CNFDebugger.clause_translate(clauses, self.id_pool))
+                                                                             ws=layer.ids, layer_id=i,
+                                                                             id_pool=self.id_pool)
                 self.clauses.extend(clauses)
         return hs
 
@@ -104,5 +106,17 @@ class SATNet:
         self.solution = CNFDebugger.get_solver_model(solver, cnf)
         print(self.solution)
         if status:
-            self.update_network_params()
+            with torch.no_grad():
+                self.update_network_params()
         return
+
+    def forward(self, X):
+        h = X
+        print("forward")
+        for i, layer in enumerate(self.model):
+            print(f"Layer: {i}, h: \n{h}")
+            print(f"To Be \n{h.matmul(layer.weight.transpose(0, 1))}")
+            h = layer(h)
+            h = (h > 0).float()
+        return h
+

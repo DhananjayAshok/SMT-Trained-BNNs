@@ -94,7 +94,8 @@ class CNFBuilder:
                 ws_j = ws[j]
                 xws_j = xws[t][j]
                 for i in range(n):
-                    clauses.extend(CNFBuilder.xnor_link(xs[t][i], ws_j[i], xws_j[i]))
+                    c = CNFBuilder.xnor_link(xs[t][i], ws_j[i], xws_j[i])
+                    clauses.extend(c)
         return clauses
 
     @staticmethod
@@ -138,7 +139,7 @@ class CNFBuilder:
             for j in range(out_features):
                 xw_j = []
                 for i in range(in_features):
-                    xw = id_pool.id(f"Layer[{layer_id}]|xw{j, i}")
+                    xw = id_pool.id(f"Layer[{layer_id}]|xw{d, j, i}")
                     xw_j.append(xw)
                 xw_d.append(xw_j)
             xws.append(xw_d)
@@ -154,7 +155,7 @@ class CNFBuilder:
                 for j in range(out_features):
                     h_clauses, _, h = CNFBuilder.sequential_counter(xws[d][j], vpool=id_pool,
                                                                     prefix=f"h[{layer_id}]{d, j}",
-                                                                    C=(out_features+1)//2)
+                                                                    C=(in_features+1)//2)
                     h_list.append(h)
                     clauses.extend(h_clauses)
                 hs.append(h_list)
@@ -202,10 +203,20 @@ class CNFDebugger:
         return item
 
     @staticmethod
-    def print_cnf_vars(cnf):
+    def print_cnf_vars(cnf=None, id_pool=None, skip=None):
+        assert (cnf is not None and hasattr(cnf, 'vpool')) or id_pool is not None
+        vpool = None
+        if cnf is None:
+            vpool = id_pool
+        else:
+            vpool = cnf.vpool
         vars = []
-        for inp in range(1, cnf.nv + 1):
-            name = CNFDebugger.cnf_int_to_var_name(inp, cnf.vpool)
+        for inp in range(1, vpool.top):
+            if skip is not None and inp in skip:
+                continue
+            name = CNFDebugger.cnf_int_to_var_name(inp, vpool)
+            if skip is not None and name in skip:
+                continue
             if name is not None:
                 vars.append(f"{inp, name}")
         print(vars)
