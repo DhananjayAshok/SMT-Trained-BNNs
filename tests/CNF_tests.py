@@ -3,6 +3,68 @@ from utils import CNFBuilder, IDPool, CNFDebugger
 from pysat.solvers import Solver
 from pysat.formula import CNF
 import numpy as np
+from itertools import product
+
+
+def all_assignments(n):
+    return [list(x) for x in product([None, False, True], repeat=n)]
+
+
+def complete_assignments(assignment):
+    if None not in assignment:
+        return [assignment]
+    else:
+        none_ind = assignment.index(None)
+        b1 = assignment.copy()
+        b2 = assignment.copy()
+        b1[none_ind] = True
+        b2[none_ind] = False
+        return complete_assignments(b1) + complete_assignments(b2)
+
+
+def check(var_names, status, condition, initial_assignment):
+    """
+    var_names is an ordered list of variable names used to check the condition
+    condition is a function that takes in a list of boolean values corresponding to assignments based on the order of
+        the varnames and ouptuts true iff the condition is satisfied
+    initial_assignment is the list of (partial) assignment given to the solver.
+    """
+    if not status:
+        ca = complete_assignments(initial_assignment)
+        # If solver could not find solutions then no completion of the initial assignment should sat the condition
+        for assignment in ca:
+            if condition(assignment):
+                return False
+        return True
+    else:
+        assignment = []
+        for var in var_names:
+            assignment.append(status[var])
+        return condition(assignment)
+
+
+def check_cnf_clause(cnf_builder_func, n_vars, condition):
+    all_options = all_assignments(n_vars)
+    for initial_assignment in all_options:
+        var_names = []
+        vpool = IDPool()
+        for var in range(1, n_vars+1):
+            var_names.append(vpool.id(var))
+        cnf = CNF()
+        cnf.vpool = vpool
+        cnf.extend(cnf_builder_func(*var_names))
+        for i, val in enumerate(initial_assignment):
+            if val is None:
+                continue
+            if val is True:
+                cnf.append([var_names[i]])
+            else:
+                cnf.append([-var_names[i]])
+        status = basic_solver(cnf)
+        res = check(var_names, status, condition, initial_assignment)
+        if not res:
+            return False
+    return True
 
 
 def basic_setup():
@@ -79,79 +141,22 @@ def test_implies():
 
 
 def test_iff():
-    basic_cnf, a, b, c, d = basic_setup()
-    # First test 1 <=> 3 and 2 <=> 4
-    oit = CNFBuilder.iff(a, c)
-    tif = CNFBuilder.iff(b, d)
-    basic_cnf.extend(oit)
-    basic_cnf.extend(tif)
-    status = basic_solver(basic_cnf)
-    assert status is not False
-    assert status["c"]
-    assert not status["d"]
+    condition = lambda x: x[0] == x[1]
+    res = check_cnf_clause(CNFBuilder.iff, n_vars=2, condition=condition)
+    assert res
 
 
 def test_aiffboc():
     # testing a <=> b or c
-    # First test True <=> False or ? makes ? into True
-    basic_cnf, a, b, c, d = basic_setup()
-    clauses = CNFBuilder.aiffboc(a, b, c)
-    basic_cnf.extend(clauses)
-    status = basic_solver(basic_cnf)
-    assert status is not False
-    assert status["c"]
-
-    # Next test False <=> ? or ? makes both into False
-    basic_cnf, a, b, c, d = basic_setup()
-    clauses = CNFBuilder.aiffboc(b, c, d)
-    basic_cnf.extend(clauses)
-    status = basic_solver(basic_cnf)
-    assert status is not False
-    assert not status["c"]
-    assert not status["d"]
-
-    # Test True <=> False or False is no solution
-    basic_cnf, a, b, c, d = basic_setup()
-    clauses = CNFBuilder.aiffboc(a, b, c)
-    basic_cnf.extend(clauses)
-    basic_cnf.append([-c])
-    status = basic_solver(basic_cnf)
-    assert not status
-
-    # Test False <=> True or ? is no solution
-    basic_cnf, a, b, c, d = basic_setup()
-    clauses = CNFBuilder.aiffboc(b, a, d)
-    basic_cnf.extend(clauses)
-    status = basic_solver(basic_cnf)
-    assert not status
+    condition = lambda x: x[0] == (x[1] or x[2])
+    res = check_cnf_clause(CNFBuilder.aiffboc, n_vars=3, condition=condition)
+    assert res
 
 
 def test_aiffbacod():
-    # Testing A <=> (B and C) or D
-    # Test True <=> (False and ?) or ? sets D to True
-    basic_cnf, a, b, c, d = basic_setup()
-    clauses = CNFBuilder.aiffbacod(a, b, c, d)
-    basic_cnf.extend(clauses)
-    status = basic_solver(basic_cnf)
-    assert status is not False
-    assert status["d"]
-
-    # Test False <=> (True and ?) or ? Sets both to False
-    basic_cnf, a, b, c, d = basic_setup()
-    clauses = CNFBuilder.aiffbacod(b, a, c, d)
-    basic_cnf.extend(clauses)
-    status = basic_solver(basic_cnf)
-    assert status is not False
-    assert not status["d"]
-    assert not status["c"]
-
-    # Test True <=> (False and ?) or False has no solution
-    basic_cnf, a, b, c, d = basic_setup()
-    clauses = CNFBuilder.aiffbacod(a, b, c, d)
-    basic_cnf.extend(clauses)
-    basic_cnf.append([-d])
-    status = basic_solver(basic_cnf)
-    assert not status
+    condition = lambda x: x[0] == ( (x[1] and x[2]) or x[3])
+    res = check_cnf_clause(CNFBuilder.aiffbacod, n_vars=4, condition=condition)
+    assert res
 
 
 def test_sequential_counter():
@@ -252,6 +257,7 @@ def test_linear_product_link():
     assert not status["h"]
     assert not status["i"]
     assert status["j"]
+    assert False
 
 
 def test_create_layer():
@@ -270,8 +276,14 @@ def test_create_layer():
                                                               do_linking=do_linking)
     clauses.extend([[xs[0][0]], [-xs[0][1]]])
     for i in range(2):
+        print(basic_cnf.vpool.obj(ws[0][i]), basic_cnf.vpool.obj(ws[1][i]))
         clauses.append([ws[0][i]])
         clauses.append([-ws[1][i]])
+        # a1, b1 are True, d, e are False
+    # We should be doing
+
+
+
 
     basic_cnf.extend(clauses)
     status = basic_solver(basic_cnf)
@@ -285,10 +297,10 @@ def test_create_layer():
     assert len(hs[0]) == out_features
     print(status)
     assert status is not False
-    assert status[f"l{0},d{0},xw{0, 0}"]
-    assert not status[f"l{0},d{0},xw{0, 1}"]
-    assert not status[f"l{0},d{0},xw{1, 0}"]
-    assert status[f"l{0},d{0},xw{1, 1}"]
+    assert status[f"Layer[{0}]|xw{0, 0, 0}"]
+    assert not status[f"Layer[0]|xw{0, 0, 1}"]
+    assert not status[f"Layer[0]|xw{0, 1, 0}"]
+    assert status[f"Layer[0]|xw{0, 1, 1}"]
 
 
 def test_nn():
