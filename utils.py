@@ -48,6 +48,7 @@ class CNFBuilder:
         vpool is an IDPool with all variables stored till now, or a fresh one is created
         prefix is a string identifier used to distinguish between multiple scs in the same CNF
         If C is none we assume C = len(var_list) = m
+        r[m, C] is True iff at least C elements of the input sequence is true.
         """
         clauses = []
         if vpool is None:
@@ -84,7 +85,7 @@ class CNFBuilder:
         n input dimensionality, m output dimensionality
         xs: nested list shape [n_datapoints, n]
         ws: nested list shape [m, n]
-        xws: nested list shape [n_datapoints, m, n]
+        xws: nested list shape [n_datapoints, m, n] (technically XW^T presum as sum is done during activation h)
         the activation of h[t, i] will be 1 iff sum of all (over i) xws[t, i] > constant cutoff
         """
         clauses = []
