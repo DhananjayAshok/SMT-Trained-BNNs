@@ -159,105 +159,89 @@ def test_aiffbacod():
     assert res
 
 
+def sequential_counter_given_sequence(seq):
+    """
+    Seq is a list of True, False or None values.
+    """
+    n = len(seq)
+    for C in range(1, n+1):
+        cnf = CNF()
+        vpool = IDPool()
+        vars = []
+        for i, var in enumerate(seq):
+            assert i+1 == vpool.id(i+1)
+            vars.append(i+1)
+            if var is not None:
+                if var:
+                    cnf.append([i+1])
+                else:
+                    cnf.append([-(i+1)])
+        cnf.vpool = vpool
+        clauses, _, final = CNFBuilder.sequential_counter(vars, vpool=vpool, prefix="test", C=C)
+        cnf.extend(clauses)
+        status = basic_solver(cnf)
+        gtsum = False
+        for var in vars:
+            gtsum += status[var]
+        return status, f"test_r{n, C}", vpool.obj(final), gtsum >= C
+
+
 def test_sequential_counter():
-    # Should add more tests for correctness
-    prefix = "test"
-    # Test when sum = 1
-    basic_cnf, a, b, c, d = basic_setup()
-    vpool = basic_cnf.vpool
-    basic_cnf.append([-c])
-    basic_cnf.append([-d])
-    clauses, _, final = CNFBuilder.sequential_counter([a, b, c, d], vpool=vpool, prefix=prefix, C=4)
-    basic_cnf.extend(clauses)
-    status = basic_solver(basic_cnf)
-    assert status is not False
-    for i in range(1, 4+1):
-        assert status[f"{prefix}_r{i, 1}"]
-    for i in range(1, 4+1):
-        assert not status[f"{prefix}_r{i, 2}"]
-        assert not status[f"{prefix}_r{i, 3}"]
-        assert not status[f"{prefix}_r{i, 4}"]
-
-    # Test when sum = 2
-    basic_cnf, a, b, c, d = basic_setup()
-    vpool = basic_cnf.vpool
-    basic_cnf.append([c])
-    basic_cnf.append([-d])
-    clauses, _, final = CNFBuilder.sequential_counter([a, b, c, d], vpool=vpool, prefix=prefix, C=4)
-    basic_cnf.extend(clauses)
-    status = basic_solver(basic_cnf)
-    assert status is not False
-    for i in range(1, 4 + 1):
-        assert status[f"{prefix}_r{i, 1}"]
-    for i in range(1, 4 + 1):
-        assert not status[f"{prefix}_r{i, 3}"]
-        assert not status[f"{prefix}_r{i, 4}"]
-    assert status[f"{prefix}_r{3, 2}"]
-    assert status[f"{prefix}_r{4, 2}"]
-
-    # Test when sum = 3
-    basic_cnf, a, b, c, d = basic_setup()
-    vpool = basic_cnf.vpool
-    basic_cnf.append([c])
-    basic_cnf.append([d])
-    clauses, _, final = CNFBuilder.sequential_counter([a, b, c, d], vpool=vpool, prefix=prefix, C=4)
-    basic_cnf.extend(clauses)
-    status = basic_solver(basic_cnf)
-    assert status is not False
-    for i in range(1, 4 + 1):
-        assert status[f"{prefix}_r{i, 1}"]
-    for i in range(1, 4 + 1):
-        assert not status[f"{prefix}_r{i, 4}"]
-        assert not status[f"{prefix}_r{i, 4}"]
-    assert status[f"{prefix}_r{3, 2}"]
-    assert status[f"{prefix}_r{4, 2}"]
-    assert status[f"{prefix}_r{4, 3}"]
+    for n in range(1, 5):
+        options = all_assignments(n)
+        for seq in options:
+            status, fstring, final, cond = sequential_counter_given_sequence(seq)
+            assert status is not None and status is not False
+            assert status[fstring] == status[final]
+            assert status[final] == cond
 
 
 def test_xnor_link():
-    # Test full truth table
-    basic_cnf, a, b, c, d = basic_setup()
-    e = basic_cnf.vpool.id("e")
-    f = basic_cnf.vpool.id("f")
-    g = basic_cnf.vpool.id("g")
-    h = basic_cnf.vpool.id("h")
-    basic_cnf.extend([[c], [-d]])
-    basic_cnf.extend(CNFBuilder.xnor_link(b, d, e))
-    basic_cnf.extend(CNFBuilder.xnor_link(b, a, f))
-    basic_cnf.extend(CNFBuilder.xnor_link(a, b, g))
-    basic_cnf.extend(CNFBuilder.xnor_link(a, c, h))
-    status = basic_solver(basic_cnf)
-    assert status
-    assert status["e"]
-    assert not status["f"]
-    assert not status["g"]
-    assert status["h"]
+    def cond(seq):
+        a, b, c = seq
+        if a == b:
+            return c
+        else:
+            return not c
+    res = check_cnf_clause(CNFBuilder.xnor_link, n_vars=3, condition=cond)
+    assert res
 
 
 def test_linear_product_link():
-    basic_cnf, a, b, c, d = basic_setup()
-    e = basic_cnf.vpool.id("e")
-    f = basic_cnf.vpool.id("f")
-    g = basic_cnf.vpool.id("g")
-    h = basic_cnf.vpool.id("h")
-    i = basic_cnf.vpool.id("i")
-    j = basic_cnf.vpool.id("j")
-    xs = [[a, b]]
-    ws = [[c, d], [e, f]]
-    xws = [[[g, h], [i, j]]]
-    clauses = [[c], [d], [-e], [-f]]
-    # We should have g = ac, h = bd, i = ae, j = bf where multiplication is XNOR
-    basic_cnf.extend(clauses)
+    xs = [[1, 2], [3, 4], [5, 6], [7, 8]] # 4 datapoints, size 2. (2 var truth table)
+    x_clauses = [[-1], [-2], [-3], [4], [5], [-6], [7], [8]]
+    vpool = IDPool()
+    cnf = CNF()
+    cnf.extend(x_clauses)
+    # Assuming next layer is 4 dimensional makes ws 4 x 2 (2 var truth table as well)
+    ws = [[9, 10], [11, 12], [13, 14], [15, 16]]
+    w_clauses = [[-9], [-10], [-11], [12], [13], [-14], [15], [16]]
+    cnf.extend(w_clauses)
+
+    # This makes xws 4 x 4 x 2
+    sign_pos = lambda x: (x/abs(x)) == 1
+    list_signs = lambda x: [[sign_pos(n1), sign_pos(n2)] for n1, n2 in x]
+    xws1 = [[17, 18], [19, 20], [21, 22], [23, 24]]
+    expected_xws1 = list_signs([[-1 * -9, -2 * -10], [-1 * -11, -2 * 12], [-1 * 13, -2 * -14], [-1 * 15, -2 * 16]])
+    xws2 = [[25, 26], [27, 28], [29, 30], [31, 32]]
+    expected_xws2 = list_signs([[-3 * -9, 4 * -10], [-3 * -11, 4 * 12], [-3 * 13, 4 * -14], [-3 * 15, 4 * 16]])
+    xws3 = [[33, 34], [35, 36], [37, 38], [39, 40]]
+    expected_xws3 = list_signs([[5 * -9, -6 * -10], [5 * -11, -6 * 12], [5 * 13, -6 * -14], [5 * 15, -6 * 16]])
+    xws4 = [[41, 42], [43, 44], [45, 46], [47, 48]]
+    expected_xws4 = list_signs([[7 * -9, 8 * -10], [7 * -11, 8 * 12], [7 * 13, 8 * -14], [7 * 15, 8 * 16]])
+    xws = [xws1, xws2, xws3, xws4]
+    expected_xws = [expected_xws1, expected_xws2, expected_xws3, expected_xws4]
+    for i in range(1, 48+1):
+        vpool.id(i)
+    cnf.vpool = vpool
     clauses = CNFBuilder.linear_product_link(xs, ws, xws)
-    basic_cnf.extend(clauses)
-    status = basic_solver(basic_cnf)
-    print(status)
-    assert status is not False
-    assert status["g"]
-    assert not status["h"]
-    assert not status["i"]
-    assert status["j"]
-    assert False
+    cnf.extend(clauses)
+    status = basic_solver(cnf)
+    assert status is not None
+    for d in range(len(xws)):
+        for m in range(len(xws[0])):
+            for n in range(len(xws[0][0])):
+                assert status[xws[d][m][n]] == expected_xws[d][m][n]
 
 
 def test_create_layer():
@@ -269,22 +253,16 @@ def test_create_layer():
     in_features = 3
     out_features = 2
     id_pool = basic_cnf.vpool
-    do_linking = False
+    do_linking = True
     ws = [[a1, b1, c], [d, e, f]]
     xs, ws, xws, hs, clauses = CNFBuilder.create_linear_layer(in_features, out_features, n_datapoints=1, ws=ws,
                                                               id_pool=id_pool, layer_id="0", xs=[],
                                                               do_linking=do_linking)
     clauses.extend([[xs[0][0]], [-xs[0][1]]])
     for i in range(2):
-        print(basic_cnf.vpool.obj(ws[0][i]), basic_cnf.vpool.obj(ws[1][i]))
         clauses.append([ws[0][i]])
         clauses.append([-ws[1][i]])
         # a1, b1 are True, d, e are False
-    # We should be doing
-
-
-
-
     basic_cnf.extend(clauses)
     status = basic_solver(basic_cnf)
     assert len(xs) == 1
@@ -295,7 +273,6 @@ def test_create_layer():
     assert len(xws[0][0]) == in_features
     assert len(hs) == 1
     assert len(hs[0]) == out_features
-    print(status)
     assert status is not False
     assert status[f"Layer[{0}]|xw{0, 0, 0}"]
     assert not status[f"Layer[0]|xw{0, 0, 1}"]
@@ -342,23 +319,4 @@ def test_nn():
     status = basic_solver(cnf)
     print(status)
     assert not status
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    
