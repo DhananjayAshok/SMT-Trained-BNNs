@@ -1,3 +1,5 @@
+import warnings
+
 import torch
 from torch.nn import Linear, Conv2d
 import numpy as np
@@ -40,6 +42,18 @@ class SATNet:
                 w = self.solution.get(f"Layer[{i}]|w{j, iii}")
                 n_w = 1 if w else -1
                 layer.weight[j, iii] = n_w
+
+    def get_linear_param_ids(self, i, out_features, in_features):
+        """
+        Gives back the linear weight params ids as in the CNF for layer i
+        """
+        ws = []
+        for j in range(out_features):
+            w = []
+            for iii in range(in_features):
+                w.append(self.id_pool.id(f"Layer[{i}]|w{j, iii}"))
+            ws.append(w)
+        return ws
 
     def create_network_params(self):
         for i in range(len(self.model)):
@@ -108,10 +122,12 @@ class SATNet:
         solver = self.solver_class(bootstrap_with=cnf)
         status = solver.solve()
         self.solution = CNFDebugger.get_solver_model(solver, cnf)
-        print(self.solution)
+        # print(self.solution)
         if status:
             with torch.no_grad():
                 self.update_network_params()
+        else:
+            warnings.warn("SAT Solver Found No Solution")
 
     def max_sat_sweep(self, X, y):
         self.create_sat_model(X, y)
@@ -134,11 +150,8 @@ class SATNet:
 
     def forward(self, X):
         h = X
-        print("forward")
         for i, layer in enumerate(self.model):
-            print(f"Layer: {i}, h: \n{h}")
-            print(f"To Be \n{h.matmul(layer.weight.transpose(0, 1))}")
             h = layer(h)
-            h = (h > 0).float()
+            h = 2*(h > 0).float()-1
         return h
 

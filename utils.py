@@ -7,6 +7,10 @@ def int_array(x):
     return x
 
 
+def is_false(item):
+    return item == 0 or item == -1 or item is False
+
+
 class CNFBuilder:
     @staticmethod
     def get_IDPool():
@@ -109,7 +113,8 @@ class CNFBuilder:
 
         returns a list of clauses which encodes xws = Wx if do_linking is True.
 
-        Typically the next layer h is such that h[j] = 1 <=> sum of all xws[j] > constant
+        Typically the next layer h is such that h[j] = 1 <=> sum of all xws[j] > 0
+            (Hence C is set to be more than half of the number of input bits)
 
         """
         xws = []
@@ -156,7 +161,7 @@ class CNFBuilder:
                 for j in range(out_features):
                     h_clauses, _, h = CNFBuilder.sequential_counter(xws[d][j], vpool=id_pool,
                                                                     prefix=f"h[{layer_id}]{d, j}",
-                                                                    C=(in_features+1)//2)
+                                                                    C=(in_features//2)+1)
                     h_list.append(h)
                     clauses.extend(h_clauses)
                 hs.append(h_list)
@@ -171,26 +176,33 @@ class CNFBuilder:
         Returns the constraints for assigning every element of inp_array to the corresponding inp_list values.
         """
         clauses = []
-        if val_type == "x":
+        if val_type == "x":  # shape (n_datapoints, dim)
             for i in range(len(inp_array)):
                 for j in range(len(inp_array[0])):
-                    if inp_array[i, j] == 0 or not inp_array[i][j]:
+                    if is_false(inp_array[i, j]):
                         clauses.append([-inp_list[i][j]])
                     else:
                         clauses.append([inp_list[i][j]])
 
-        if val_type == "w":
-            pass
-        if val_type == "o":
-            for i in range(len(inp_array)):
-                if (hasattr(inp_array, 'shape') and len(inp_array.shape) == 1) or not hasattr(inp_array, 'shape'):
-                    if inp_array[i] == 0 or not inp_array[i]:
-                        clauses.append([-inp_list[i]])
+        if val_type == "w":  # Shape (output_dim, input_dim)
+            for m in range(len(inp_array)):
+                for n in range(len(inp_array[0])):
+                    if is_false(inp_array[m][n]):
+                        clauses.append([-inp_list[m][n]])
                     else:
-                        clauses.append([inp_list[i]])
+                        clauses.append([inp_list[m][n]])
+
+        if val_type == "o":  # Shape (n_datapoints,) or (n_datapoints, 1)
+            for i in range(len(inp_array)):
+                one_dim = len(inp_array[0]) == 1
+                if one_dim:
+                    if is_false(inp_array[i]):
+                        clauses.append([-inp_list[i][0]])
+                    else:
+                        clauses.append([inp_list[i][0]])
                 else:
                     for j in range(len(inp_array[0])):
-                        if inp_array[i] == 0 or not inp_array[i]:
+                        if is_false(inp_array[i][j]):
                             clauses.append([-inp_list[i][j]])
                         else:
                             clauses.append([inp_list[i][j]])

@@ -3,7 +3,7 @@ from SATNet import SATNet
 import torch.nn as nn
 import torch
 from pysat.formula import CNF
-from utils import CNFDebugger
+from utils import CNFDebugger, CNFBuilder
 
 
 def single_layer_network(in_dim, out_dim):
@@ -19,9 +19,12 @@ def double_layer_network(in_dim, mid_dim, out_dim):
     return SATNet(model)
 
 
-def rand_binary(*shape):
+def rand_binary(*shape, minus=True):
     arr = torch.rand(shape)
-    return (arr > 0.5).float()
+    if not minus:
+        return (arr > 0.5).float()
+    else:
+        return 2*((arr > 0.5).float()) - 1
 
 
 def rand_X_y(in_dim, out_dim, bs=32):
@@ -30,15 +33,14 @@ def rand_X_y(in_dim, out_dim, bs=32):
 
 def X_halfsum(in_dim, bs=32):
     X = rand_binary(bs, in_dim)
-    y = (X.sum(axis=-1) > in_dim//2).float().reshape(bs, 1)
+    y = (2*(X.sum(axis=-1) > 0).float()-1).reshape(bs, 1)
     return X, y
+
 
 def parity(in_dim=4, bs=32):
     X = rand_binary(bs, in_dim)
-    y = (X.sum(axis=-1) %2 == 1).float().reshape(bs, 1)
+    y = (2*(((X/2+0.5).sum(axis=-1) % 2 == 1).float())-1).reshape(bs, 1)
     return X, y
-
-
 
 
 def test_create_linear_params():
@@ -74,7 +76,6 @@ def test_create_network_params():
 
 
 def test_create_datapoint_params():
-    return
     # Unsure how to test yet
     in_dim = 3
     mid_dim = 2
@@ -90,58 +91,99 @@ def test_create_datapoint_params():
     cnf.vpool= satnet.id_pool
     solver = satnet.solver_class(bootstrap_with=cnf)
     solver.solve()
-    print("Core ", solver.get_core())
     solution = CNFDebugger.get_solver_model(solver, cnf)
     assert solution is not None
+    X = X/2 + 0.5
+    for d in range(len(X)):
+        for i in range(in_dim):
+            assert solution[f"X{d, i}"] == X[d, i]
 
 
-def test_create_architecture_small():
-    # Unsure how to test yet
-    in_dim = 2
-    mid_dim = 2
-    out_dim = 1
-    bs = 2
-    satnet = single_layer_network(in_dim, out_dim)
-    satnet.create_network_params()
-    X = rand_binary(bs, in_dim)
-    xs = satnet.create_datapoint_params(X)
-    os = satnet.create_architecture(xs)
-    cnf = CNF()
-    cnf.extend(satnet.hard_clauses)
-    cnf.vpool= satnet.id_pool
-    solver = satnet.solver_class(bootstrap_with=cnf)
-    solver.solve()
-    print("Core ", solver.get_core())
-    solution = CNFDebugger.get_solver_model(solver, cnf)
-    for c in CNFDebugger.clause_translate(clauses=cnf.clauses, vpool=cnf.vpool):
-        print(c)
-    assert solution is not None
+def test_create_architecture_1_layer():
+    # bs, in_dim, out_dim
+    configurations = [(3, 3, 2), (5, 2, 3), (1, 1, 1), (1, 2, 1), (1, 1, 3)]
+    for bs, in_dim, out_dim in configurations:
+        #  print("_"*10)
+        #  print(f"Configurations: {bs, in_dim, out_dim}")
+        satnet = single_layer_network(in_dim, out_dim)
+        satnet.create_network_params()
+        X = rand_binary(bs, in_dim)
+        ws_array = rand_binary(out_dim, in_dim)
+        ws_inds = satnet.get_linear_param_ids(i=0, out_features=out_dim, in_features=in_dim)
+        expected_o = (X.matmul(ws_array.transpose(0, 1)) > 0)
+        xs = satnet.create_datapoint_params(X)
+        os = satnet.create_architecture(xs)
+        cnf = CNF()
+        cnf.extend(satnet.hard_clauses)
+        clauses = CNFBuilder.assign_values(ws_array, ws_inds, val_type="w")
+        cnf.extend(clauses)
+        cnf.vpool = satnet.id_pool
+        solver = satnet.solver_class(bootstrap_with=cnf)
+        solver.solve()
+        solution = CNFDebugger.get_solver_model(solver, cnf)
+        assert solution is not None
+        """
+        print(f"\nX")
+        print(X)
+        print("W")
+        print(ws_array)
+        print("XW^T")
+        print(X.matmul(ws_array.transpose(0, 1)))
+        """
+        for d in range(bs):
+            for m in range(out_dim):
+                #  print(f"Checking {satnet.id_pool.obj(os[d][m])} {solution[satnet.id_pool.obj(os[d][m])]} vs "
+                #      f"{expected_o[d, m]}")
+                assert solution[satnet.id_pool.obj(os[d][m])] == expected_o[d, m]
 
 
-def test_create_architecture():
-    # Unsure how to test yet
+def test_create_architecture_2_layer():
+    # bs, in_dim, mid_dim, out_dim
+    configurations = [(3, 3, 2, 2), (5, 2, 1, 3), (1, 1, 1,  1), (1, 2, 3, 1), (1, 1, 2, 3)]
+    for bs, in_dim, mid_dim, out_dim in configurations:
+        #  print("_"*10)
+        #  print(f"Configurations: {bs, in_dim, out_dim}")
+        satnet = double_layer_network(in_dim, mid_dim, out_dim)
+        satnet.create_network_params()
+        X = rand_binary(bs, in_dim)
+        ws_array0 = rand_binary(mid_dim, in_dim)
+        ws_inds0 = satnet.get_linear_param_ids(i=0, out_features=mid_dim, in_features=in_dim)
+        expected_h_bool = X.matmul(ws_array0.transpose(0, 1)) > 0
+        expected_h = 2 * expected_h_bool.float() - 1
+        ws_array1 = rand_binary(out_dim, mid_dim)
+        ws_inds1 = satnet.get_linear_param_ids(i=1, out_features=out_dim, in_features=mid_dim)
+        expected_o_bool = expected_h.matmul(ws_array1.transpose(0, 1)) > 0
+
+        xs = satnet.create_datapoint_params(X)
+        os = satnet.create_architecture(xs)
+        cnf = CNF()
+        cnf.extend(satnet.hard_clauses)
+        clauses = CNFBuilder.assign_values(ws_array0, ws_inds0, val_type="w")
+        cnf.extend(clauses)
+        clauses = CNFBuilder.assign_values(ws_array1, ws_inds1, val_type="w")
+        cnf.extend(clauses)
+        cnf.vpool = satnet.id_pool
+        solver = satnet.solver_class(bootstrap_with=cnf)
+        solver.solve()
+        solution = CNFDebugger.get_solver_model(solver, cnf)
+        assert solution is not None
+        """
+        print(f"\nX")
+        print(X)
+        print("W")
+        print(ws_array)
+        print("XW^T")
+        print(X.matmul(ws_array.transpose(0, 1)))
+        """
+        for d in range(bs):
+            for m in range(out_dim):
+                #  print(f"Checking {satnet.id_pool.obj(os[d][m])} {solution[satnet.id_pool.obj(os[d][m])]} vs "
+                #      f"{expected_o[d, m]}")
+                assert solution[satnet.id_pool.obj(os[d][m])] == expected_o_bool[d, m]
+
+
+def test_create_output_params():
     in_dim = 3
-    mid_dim = 2
-    out_dim = 1
-    satnet = double_layer_network(in_dim=in_dim, mid_dim=mid_dim, out_dim=out_dim)
-    satnet.create_network_params()
-    X = rand_binary(32, in_dim)
-    xs = satnet.create_datapoint_params(X)
-    os = satnet.create_architecture(xs)
-    cnf = CNF()
-    cnf.extend(satnet.hard_clauses)
-    cnf.vpool= satnet.id_pool
-    solver = satnet.solver_class(bootstrap_with=cnf)
-    solver.solve()
-    print("Core ", solver.get_core())
-    solution = CNFDebugger.get_solver_model(solver, cnf)
-    assert solution is not None
-
-
-def test_create_output_params_small():
-    # Unsure how to test yet
-    in_dim = 3
-    mid_dim = 2
     out_dim = 1
     bs = 2
     satnet = single_layer_network(in_dim, out_dim)
@@ -156,74 +198,85 @@ def test_create_output_params_small():
     satnet.create_output_params(os, y)
     cnf = CNF()
     cnf.extend(satnet.hard_clauses)
+    cnf.extend(satnet.soft_clauses)
     cnf.vpool= satnet.id_pool
     solver = satnet.solver_class(bootstrap_with=cnf)
     solver.solve()
     solution = CNFDebugger.get_solver_model(solver, cnf)
-    print(f"Dataset is: \n{X}\n{y}")
-    for c in CNFDebugger.clause_translate(clauses=cnf.clauses, vpool=cnf.vpool):
-        print(c)
+    expected_o = y == 1
     assert solution is not None
+    print(solution)
+    for d in range(bs):
+        for m in range(out_dim):
+            #  print(f"Checking {satnet.id_pool.obj(os[d][m])} {solution[satnet.id_pool.obj(os[d][m])]} vs "
+            #      f"{expected_o[d, m]}")
+            assert solution[satnet.id_pool.obj(os[d][m])] == expected_o[d, m]
 
 
-def test_create_output_params():
-    # Unsure how to test yet
-    in_dim = 3
-    mid_dim = 10
-    out_dim = 1
-    satnet = double_layer_network(in_dim=in_dim, mid_dim=mid_dim, out_dim=out_dim)
+def test_sat_sweep_1_layer():
+    # bs, in_dim, out_dim
+    configurations = [(3, 3, 2), (5, 2, 3), (1, 1, 1), (1, 2, 1), (1, 1, 3)]
+    for bs, in_dim, out_dim in configurations:
+        satnet = single_layer_network(in_dim=in_dim, out_dim=out_dim)
+        satnet.create_network_params()
+        X = rand_binary(bs, in_dim)
+        W = rand_binary(out_dim, in_dim)
+        y = 2 * (X.matmul(W.transpose(0, 1)) > 0).float() - 1
+        satnet.sat_sweep(X, y)
+        pred = satnet.forward(X)
+        a = torch.rand(size=(bs, 2 * out_dim))
+        a[:, :out_dim] = y
+        a[:, out_dim:] = pred
+        assert (y == pred).all()
+
+
+def test_sat_sweep_2_layer():
+    # bs, in_dim, mid_dim, out_dim
+    configurations = [(3, 3, 2, 2), (5, 2, 1, 3), (1, 1, 1, 1), (1, 2, 3, 1), (1, 1, 2, 3)]
+    for bs, in_dim, mid_dim, out_dim in configurations:
+        satnet = double_layer_network(in_dim=in_dim, mid_dim=mid_dim, out_dim=out_dim)
+        satnet.create_network_params()
+        X = rand_binary(bs, in_dim)
+        W0 = rand_binary(mid_dim, in_dim)
+        W1 = rand_binary(out_dim, mid_dim)
+        h = 2 * (X.matmul(W0.transpose(0, 1)) > 0).float() - 1
+        y = 2 * (h.matmul(W1.transpose(0, 1)) > 0).float() - 1
+        satnet.sat_sweep(X, y)
+        pred = satnet.forward(X)
+        a = torch.rand(size=(bs, 2 * out_dim))
+        a[:, :out_dim] = y
+        a[:, out_dim:] = pred
+        assert (y==pred).all()
+
+
+def test_parity_sat():
+    satnet = double_layer_network(in_dim=4, mid_dim=2, out_dim=1)
     satnet.create_network_params()
-    X = rand_binary(32, in_dim)
-    y = rand_binary(32, out_dim)
-    xs = satnet.create_datapoint_params(X)
-    assert len(xs) == 32
-    assert len(xs[0]) == in_dim
-    os = satnet.create_architecture(xs)
-    assert len(os) == 32
-    assert len(os[0]) == out_dim
-    satnet.create_output_params(os, y)
-    cnf = CNF()
-    cnf.extend(satnet.hard_clauses)
-    cnf.vpool= satnet.id_pool
-    solver = satnet.solver_class(bootstrap_with=cnf)
-    solver.solve()
-    print("Core ", solver.get_core())
-    solution = CNFDebugger.get_solver_model(solver, cnf)
-    assert solution is not None
-
-
-def test_sat_sweep_small():
-    in_dim = 3
-    mid_dim = 2
-    out_dim = 1
-    satnet = double_layer_network(in_dim=in_dim, mid_dim=mid_dim, out_dim=out_dim)
-    satnet.create_network_params()
-    bs = 5
-    X = rand_binary(bs, in_dim)
-    y = rand_binary(bs, out_dim)
-    X, y = parity(in_dim=in_dim, bs=bs)
+    X, y = parity(4, 32)
     satnet.sat_sweep(X, y)
     pred = satnet.forward(X)
-    a = torch.rand(size=(bs, 2 * out_dim))
-    a[:, :out_dim] = y
-    a[:, out_dim:] = pred
-    print(a)
-    assert False
-
-
-def test_sat_sweep():
-    in_dim = 3
-    mid_dim = 2
-    out_dim = 1
-    satnet = double_layer_network(in_dim=in_dim, mid_dim=mid_dim, out_dim=out_dim)
-    satnet.create_network_params()
-    bs = 5
-    X = rand_binary(bs, in_dim)
-    y = rand_binary(bs, out_dim)
-    satnet.sat_sweep(X, y)
+    a = (y - pred)
+    assert all(a==0)
+    print(f"Perfect on Training Set")
+    X, y = parity(4, 32)
     pred = satnet.forward(X)
-    a = torch.rand(size=(bs, 2 * out_dim))
-    a[:, :out_dim] = y
-    a[:, out_dim:] = pred
-    print(a)
-    assert False
+    a = (y - pred)
+    assert all(a == 0)
+
+
+def test_parity_maxsat():
+    satnet = double_layer_network(in_dim=4, mid_dim=2, out_dim=1)
+    satnet.create_network_params()
+    X, y = parity(4, 32)
+    satnet.max_sat_sweep(X, y)
+    pred = satnet.forward(X)
+    a = (y - pred)
+    assert all(a == 0)
+    print(f"Perfect on Training Set")
+    X, y = parity(4, 32)
+    pred = satnet.forward(X)
+    a = (y - pred)
+    assert all(a == 0)
+
+
+

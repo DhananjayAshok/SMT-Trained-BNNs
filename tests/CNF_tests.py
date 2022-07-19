@@ -258,10 +258,10 @@ def test_create_layer():
                                                               ws=ws, id_pool=vpool, layer_id="0", xs=xs,
                                                               do_linking=do_linking)
     cnf.extend(clauses)
-    expected_h1 = [True, True, True, False]
-    expected_h2 = [True, True, False, True]
-    expected_h3 = [True, False, True, True]
-    expected_h4 = [False, True, True, True]
+    expected_h1 = [True, False, False, False]
+    expected_h2 = [False, True, False, False]
+    expected_h3 = [False, False, True, False]
+    expected_h4 = [False, False, False, True]
     expected_hs = [expected_h1, expected_h2, expected_h3, expected_h4]
     status = basic_solver(cnf)
     assert status is not None
