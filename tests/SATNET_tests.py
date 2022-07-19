@@ -33,6 +33,13 @@ def X_halfsum(in_dim, bs=32):
     y = (X.sum(axis=-1) > in_dim//2).float().reshape(bs, 1)
     return X, y
 
+def parity(in_dim=4, bs=32):
+    X = rand_binary(bs, in_dim)
+    y = (X.sum(axis=-1) %2 == 1).float().reshape(bs, 1)
+    return X, y
+
+
+
 
 def test_create_linear_params():
     in_dim = 3
@@ -79,7 +86,7 @@ def test_create_datapoint_params():
     # print(satnet.clauses)
     # print(CNFDebugger.clause_translate(satnet.clauses, satnet.id_pool))
     cnf = CNF()
-    cnf.extend(satnet.clauses)
+    cnf.extend(satnet.hard_clauses)
     cnf.vpool= satnet.id_pool
     solver = satnet.solver_class(bootstrap_with=cnf)
     solver.solve()
@@ -100,7 +107,7 @@ def test_create_architecture_small():
     xs = satnet.create_datapoint_params(X)
     os = satnet.create_architecture(xs)
     cnf = CNF()
-    cnf.extend(satnet.clauses)
+    cnf.extend(satnet.hard_clauses)
     cnf.vpool= satnet.id_pool
     solver = satnet.solver_class(bootstrap_with=cnf)
     solver.solve()
@@ -122,7 +129,7 @@ def test_create_architecture():
     xs = satnet.create_datapoint_params(X)
     os = satnet.create_architecture(xs)
     cnf = CNF()
-    cnf.extend(satnet.clauses)
+    cnf.extend(satnet.hard_clauses)
     cnf.vpool= satnet.id_pool
     solver = satnet.solver_class(bootstrap_with=cnf)
     solver.solve()
@@ -148,7 +155,7 @@ def test_create_output_params_small():
     assert len(os[0]) == out_dim
     satnet.create_output_params(os, y)
     cnf = CNF()
-    cnf.extend(satnet.clauses)
+    cnf.extend(satnet.hard_clauses)
     cnf.vpool= satnet.id_pool
     solver = satnet.solver_class(bootstrap_with=cnf)
     solver.solve()
@@ -176,7 +183,7 @@ def test_create_output_params():
     assert len(os[0]) == out_dim
     satnet.create_output_params(os, y)
     cnf = CNF()
-    cnf.extend(satnet.clauses)
+    cnf.extend(satnet.hard_clauses)
     cnf.vpool= satnet.id_pool
     solver = satnet.solver_class(bootstrap_with=cnf)
     solver.solve()
@@ -194,6 +201,7 @@ def test_sat_sweep_small():
     bs = 5
     X = rand_binary(bs, in_dim)
     y = rand_binary(bs, out_dim)
+    X, y = parity(in_dim=in_dim, bs=bs)
     satnet.sat_sweep(X, y)
     pred = satnet.forward(X)
     a = torch.rand(size=(bs, 2 * out_dim))

@@ -5,7 +5,8 @@ import numpy as np
 import utils
 from utils import CNFBuilder, CNFDebugger
 from pysat.solvers import Solver
-from pysat.formula import CNF
+from pysat.formula import CNF, WCNF
+from pysat.examples.rc2 import RC2
 
 
 class SATNet:
@@ -14,10 +15,12 @@ class SATNet:
         model must be sequential
         """
         self.model = model
-        self.id_pool = CNFBuilder.get_IDPool()
-        self.clauses = []
-        self.solution = {}
         self.solver_class = Solver
+        self.id_pool = CNFBuilder.get_IDPool()
+        self.hard_clauses = []
+        self.soft_clauses = []
+        self.solution = {}
+        self.reset()
 
     def create_linear_params(self, i, layer):
         ids = []
@@ -59,7 +62,7 @@ class SATNet:
                     x = self.id_pool.id(f"X{d, iii}")
                     x_list.append(x)
                 xs.append(x_list)
-            self.clauses.extend(CNFBuilder.assign_values(X, xs, "x"))
+            self.hard_clauses.extend(CNFBuilder.assign_values(X, xs, "x"))
         elif len(X.shape) == 3:
             pass
         xs = utils.int_array(xs)
@@ -84,11 +87,11 @@ class SATNet:
                                                                              n_datapoints=n_datapoints,
                                                                              ws=layer.ids, layer_id=i,
                                                                              id_pool=self.id_pool)
-                self.clauses.extend(clauses)
+                self.hard_clauses.extend(clauses)
         return hs
 
     def create_output_params(self, os, Y):
-        self.clauses.extend(CNFBuilder.assign_values(inp_array=Y, inp_list=os, val_type="o"))
+        self.soft_clauses.extend(CNFBuilder.assign_values(inp_array=Y, inp_list=os, val_type="o"))
 
     def create_sat_model(self, X, Y):
         self.create_network_params()
@@ -99,7 +102,8 @@ class SATNet:
     def sat_sweep(self, X, y):
         self.create_sat_model(X, y)
         cnf = CNF()
-        cnf.extend(self.clauses)
+        cnf.extend(self.hard_clauses)
+        cnf.extend(self.soft_clauses)
         cnf.vpool = self.id_pool
         solver = self.solver_class(bootstrap_with=cnf)
         status = solver.solve()
@@ -108,7 +112,25 @@ class SATNet:
         if status:
             with torch.no_grad():
                 self.update_network_params()
+
+    def max_sat_sweep(self, X, y):
+        self.create_sat_model(X, y)
+        cnf = WCNF()
+        cnf.extend(self.hard_clauses)
+        cnf.extend(self.soft_clauses, weights=[1 for _ in self.soft_clauses])
+        cnf.vpool = self.id_pool
+        with RC2(cnf) as rc2:
+            for i, m in enumerate(rc2.enumerate()):
+                print('model {0} has cost {1}'.format(i, rc2.cost))
+                if i >= 5:
+                    break
         return
+
+    def reset(self):
+        self.id_pool = CNFBuilder.get_IDPool()
+        self.hard_clauses = []
+        self.soft_clauses = []
+        self.solution = {}
 
     def forward(self, X):
         h = X
