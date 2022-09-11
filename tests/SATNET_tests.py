@@ -277,6 +277,3 @@ def test_parity_maxsat():
     pred = satnet.forward(X)
     a = (y - pred)
     assert all(a == 0)
-
-
-
